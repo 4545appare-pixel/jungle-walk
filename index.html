@@ -281,6 +281,13 @@ scene.fog = new THREE.FogExp2(0x88997a, 0.028);
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.08, 240);
 camera.rotation.order = 'YXZ';
 camera.layers.enable(1);
+// 夜に歩くときのヘッドランプ（暖色、中心が明るく周りへ減衰）
+scene.add(camera);
+const headLamp = new THREE.SpotLight(0xffd9a8, 0, 32, 0.62, 0.75, 1.6);
+headLamp.position.set(0.08, 0.05, 0);
+camera.add(headLamp);
+const lampTarget = new THREE.Object3D(); lampTarget.position.set(0, -0.35, -4); camera.add(lampTarget); headLamp.target = lampTarget;
+let lampL = 0;
 
 const hemi = new THREE.HemisphereLight(0xbfd0e0, 0x3a3a22, 0.8);
 scene.add(hemi);
@@ -655,11 +662,11 @@ function addMoss(mat, o) {
     float n3 = mvn3(qm * 9.1 + 2.7);
     vec3 N = normalize(vWN);
     float m = uMUp * smoothstep(0.05, 0.6, N.y) + uMBase * (1.0 - smoothstep(0.0, 0.14, vLY)) + uMSide * smoothstep(0.1, 0.9, dot(N.xz, vec2(0.55, 0.83))) + uMAll;
-    m = clamp(m * smoothstep(0.3, 0.62, n1 * 0.75 + n2 * 0.3), 0.0, 1.0);
+    m = clamp(m * smoothstep(0.34, 0.78, n1 * 0.75 + n2 * 0.3), 0.0, 1.0);
     vec3 mossC = mix(vec3(0.045, 0.075, 0.012), vec3(0.16, 0.25, 0.025), n2 * 0.7 + n3 * 0.3);
     float lum = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
     diffuseColor.rgb = mix(diffuseColor.rgb, mossC * (0.8 + lum * 2.0), m);
-    float li = uLich * smoothstep(0.6, 0.7, n2 * 0.7 + n3 * 0.35) * (1.0 - m) * 0.85;
+    float li = uLich * smoothstep(0.64, 0.74, n3 * 0.65 + n2 * 0.4) * (1.0 - m) * 0.6;
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.3, 0.32, 0.27) * (0.75 + 0.5 * n3), li);
     if (uBaseAO > 0.5) diffuseColor.rgb *= mix(0.5, 1.0, smoothstep(-0.02, 0.1, vLY));
   }`);
@@ -706,7 +713,7 @@ function frondFn(origin, theta, elev, L, W, droop, twist, fold) {
     return { p: [origin[0] + dx * r, origin[1] + y, origin[2] + dz * r], s: [sx * hw * Math.cos(tw), hw * Math.sin(tw), sz * hw * Math.cos(tw)], f: [0, W * fold, 0] };
   };
 }
-function trunkGeo(flareAmt, lobes, vRep, plank) {
+function trunkGeo(flareAmt, lobes, vRep, plank, bend) {
   const g = new THREE.CylinderGeometry(1, 1, 1, plank ? 44 : 16, 34, true);
   g.translate(0, 0.5, 0);
   const p = g.attributes.position, uv = g.attributes.uv;
@@ -715,16 +722,16 @@ function trunkGeo(flareAmt, lobes, vRep, plank) {
     const lobe = Math.pow(Math.max(0, Math.cos(ang * lobes + 0.3 + 0.6 * Math.sin(ang * 2 + 1))), plank ? 12 : 4);
     const flare = 1 + Math.exp(-y * (plank ? 9 : 15)) * (flareAmt * (plank ? 0.12 : 0.3) + flareAmt * lobe);
     const r = (1 - 0.5 * y) * flare * (1 + 0.05 * Math.sin(y * 37 + ang * 3));
-    p.setXYZ(i, x * r + Math.sin(y * 3.1) * 0.35, y, z * r);
+    p.setXYZ(i, x * r + Math.sin(y * 3.1) * 0.35 + (bend || 0) * y * y, y, z * r);
     uv.setXY(i, uv.getX(i) * 3, y * vRep);
   }
   g.computeVertexNormals();
   return g;
 }
 function branchGeo() { const g = new THREE.CylinderGeometry(0.5, 1, 1, 6, 1, true); g.translate(0, 0.5, 0); return g; }
-function clusterGeo() {
-  const gb = new GB(), nrm = [], rnd = mulberry(33), center = new V3(0, -0.35, 0);
-  for (let q = 0; q < 11; q++) {
+function clusterGeo(seed) {
+  const gb = new GB(), nrm = [], rnd = mulberry(seed || 33), center = new V3(0, -0.35, 0), nq = 9 + (rnd() * 5 | 0);
+  for (let q = 0; q < nq; q++) {
     const c = new V3((rnd() - .5) * .62, (rnd() - .5) * .34, (rnd() - .5) * .62);
     const n = new V3(rnd() - .5, rnd() * 1.2 - 0.2, rnd() - .5).normalize();
     const t = new V3().crossVectors(n, Math.abs(n.y) < .9 ? new V3(0, 1, 0) : new V3(1, 0, 0)).normalize();
@@ -741,7 +748,7 @@ function clusterGeo() {
   return gb.build(nrm);
 }
 function fernGeo(seed) {
-  const gb = new GB(), rnd = mulberry(seed), n = 9;
+  const gb = new GB(), rnd = mulberry(seed), n = 7 + (rnd() * 6 | 0);
   for (let i = 0; i < n; i++) {
     const inner = i < 3;
     const theta = i / n * Math.PI * 2 + rnd() * 0.5;
@@ -751,7 +758,7 @@ function fernGeo(seed) {
   return gb.build();
 }
 function bigLeafGeo(seed) {
-  const gb = new GB(), rnd = mulberry(seed), n = 6;
+  const gb = new GB(), rnd = mulberry(seed), n = 4 + (rnd() * 5 | 0);
   for (let i = 0; i < n; i++) {
     const theta = i / n * Math.PI * 2 + rnd() * 0.6, h = 0.45 + rnd() * 0.5;
     const top = [Math.cos(theta) * h * 0.3, h, Math.sin(theta) * h * 0.3];
@@ -765,8 +772,8 @@ function bigLeafGeo(seed) {
   }
   return gb.build();
 }
-function palmCrownGeo() {
-  const gb = new GB(), rnd = mulberry(55), n = 14;
+function palmCrownGeo(seed) {
+  const gb = new GB(), rnd = mulberry(seed || 55), n = 11 + (rnd() * 6 | 0);
   for (let i = 0; i < n; i++) {
     const dead = i >= n - 2;
     const theta = i / n * Math.PI * 2 + rnd() * 0.35;
@@ -873,7 +880,8 @@ function between(a, b, r) {
 }
 const groups = [];
 function makeGroup(S, clear, rm, ruinR) { const g = { S, clear, rm, ruinR, items: [] }; groups.push(g); return g; }
-function part(m, L, color) { const i = m.userData.n++; if (color) m.setColorAt(i, color); return { m, i, L }; }
+function VIM(geos, mat, count, cast, recv, depth) { return { isVar: true, list: geos.map(g => IM(g, mat, count, cast, recv, depth)) }; }
+function part(m, L, color) { if (m.isVar) m = m.list[(R() * m.list.length) | 0]; const i = m.userData.n++; if (color) m.setColorAt(i, color); return { m, i, L }; }
 function addItem(g, parts, extra, wetOK) { g.items.push({ bx: R() * g.S - g.S / 2, bz: R() * g.S - g.S / 2, cx: 1e9, cz: 1e9, parts, extra: extra || 0, wetOK: !!wetOK }); }
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 const _mm = new THREE.Matrix4(), _tt = new THREE.Matrix4(), _sc = new THREE.Matrix4();
@@ -915,17 +923,16 @@ const M = {
   trunkBig: IM(trunkGeo(5.0, 5, 14, true), MAT.bark, nBig, true, true),
   trunkMid: IM(trunkGeo(1.0, 4, 6), MAT.bark, nMid, true, true),
   trunkPole: IM(trunkGeo(0.9, 4, 16), MAT.bark, nPole, true, true),
+  trunkBent: IM(trunkGeo(0.9, 4, 16, false, 5.5), MAT.bark, nPole, true, true),
   sapling: IM(saplingGeo(), MAT.bark, Q.sap, true, true),
   sapTop: IM(fernGeo(707), FOL.fern.m, Q.sap, true, true, FOL.fern.dm),
   epi: IM(fernGeo(606), FOL.fern.m, nBig * Q.epi + nPole, false, true),
   branch: IM(branchGeo(), MAT.bark, nBig * 9 + nMid * 3 + nPole * 3, true, true),
-  canopy: IM(clusterGeo(), FOL.canopy.m, nBig * 20 + nMid * 7 + nPole * 11 + Q.bush * 3, true, true, FOL.canopy.dm),
+  canopy: VIM([clusterGeo(33), clusterGeo(133), clusterGeo(233)], FOL.canopy.m, nBig * 20 + nMid * 7 + nPole * 11 + Q.bush * 3, true, true, FOL.canopy.dm),
   palmTrunk: IM(palmTrunkGeo(), MAT.palmTrunk, Q.palm + Q.upalm, true, true),
-  palmCrown: IM(palmCrownGeo(), FOL.palm.m, Q.palm + Q.upalm, true, true, FOL.palm.dm),
-  fernA: IM(fernGeo(101), FOL.fern.m, Math.ceil(Q.fern / 2), false, true),
-  fernB: IM(fernGeo(202), FOL.fern.m, Math.ceil(Q.fern / 2), false, true),
-  leafA: IM(bigLeafGeo(303), FOL.bigleaf.m, Math.ceil((Q.bigleaf + Q.herb) / 2), false, true),
-  leafB: IM(bigLeafGeo(404), FOL.bigleaf.m, Math.ceil((Q.bigleaf + Q.herb) / 2), false, true),
+  palmCrown: VIM([palmCrownGeo(55), palmCrownGeo(155), palmCrownGeo(255)], FOL.palm.m, Q.palm + Q.upalm, true, true, FOL.palm.dm),
+  fernV: VIM([fernGeo(101), fernGeo(202), fernGeo(808), fernGeo(909)], FOL.fern.m, Q.fern, false, true),
+  leafV: VIM([bigLeafGeo(303), bigLeafGeo(404), bigLeafGeo(1505), bigLeafGeo(1606)], FOL.bigleaf.m, Q.bigleaf + Q.herb, false, true),
   tuft: IM(tuftGeo(), FOL.tuft.m, Q.tuft, false, true),
   liana: IM(lianaGeo(), MAT.liana, Q.liana, true, true),
   log: IM(logGeo(), MAT.log, Q.log, true, true),
@@ -938,7 +945,7 @@ const M = {
 
 const gTrees = makeGroup(150, 2.4, 0.3, 13); gTrees.campR = 6.2;
 function barkTint() { const k = R(); return k < .5 ? tint(rr(.62, .75), rr(.74, .88), rr(.46, .56)) : k < .7 ? tint(rr(.75, .9), rr(.75, .88), rr(.62, .75)) : k < .7 ? tint(rr(.85, 1), rr(.82, .95), rr(.75, .85)) : tint(rr(.6, .72), rr(.72, .85), rr(.45, .55)); }
-function leafTint() { return [rr(.78, 1.1), rr(.92, 1.15), rr(.55, .92)]; }
+function leafTint() { const k = R(); return k < .1 ? [rr(1.1, 1.3), rr(1.0, 1.12), rr(.4, .55)] : k < .15 ? [rr(.95, 1.1), rr(.72, .85), rr(.4, .5)] : [rr(.78, 1.1), rr(.92, 1.15), rr(.55, .92)]; }
 for (let k = 0; k < nBig; k++) {
   const Ht = rr(24, 36), r = rr(0.45, 0.85), rot = R() * 6.283, parts = [];
   const kapok = R() < 0.35, bt = kapok ? tint(rr(1.05, 1.2), rr(1.05, 1.15), rr(.95, 1.05)) : barkTint();
@@ -967,16 +974,19 @@ for (let k = 0; k < nBig; k++) {
 }
 for (let k = 0; k < nPole; k++) {
   const Ht = rr(19, 32), r = rr(0.2, 0.4), rot = R() * 6.283, parts = [];
-  parts.push(part(M.trunkPole, mat4(new V3(0, -0.3, 0), rot, new V3(r, Ht, r), rr(-.03, .03), rr(-.03, .03)), barkTint()));
+  const bent = R() < 0.3, lean = R() < 0.15, tx = lean ? rr(.08, .18) * (R() < .5 ? -1 : 1) : rr(-.03, .03), tz = lean ? rr(-.1, .1) : rr(-.03, .03);
+  const Rm = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(tx, rot, tz, 'YXZ'));
+  const tr = (p, yk) => p.clone().add(new V3(bent ? 5.5 * r * yk * yk : 0, 0, 0)).applyMatrix4(Rm);
+  parts.push(part(bent ? M.trunkBent : M.trunkPole, mat4(new V3(0, -0.3, 0), rot, new V3(r, Ht, r), tx, tz), barkTint()));
   const crownR = rr(4, 7), lt = leafTint(), cl = [];
   for (let j = 0; j < 11; j++) {
     const a = R() * 6.283, rad = Math.sqrt(R()) * crownR, y = Ht * rr(.86, 1.0) - rad * 0.25, s = rr(3.5, 6);
-    const pos = new V3(Math.cos(a) * rad, y, Math.sin(a) * rad); cl.push(pos);
+    const pos = tr(new V3(Math.cos(a) * rad, y, Math.sin(a) * rad), y / Ht); cl.push(pos);
     parts.push(part(M.canopy, mat4(pos, R() * 6.283, new V3(s, s * rr(.4, .6), s)), tint(lt[0], lt[1], lt[2])));
   }
-  for (let j = 0; j < 3; j++) parts.push(part(M.branch, between(new V3(0, Ht * rr(.66, .8), 0), cl[j], r * 0.45 + 0.04), barkTint()));
+  for (let j = 0; j < 3; j++) { const by = Ht * rr(.66, .8); parts.push(part(M.branch, between(tr(new V3(0, by, 0), by / Ht), cl[j], r * 0.45 + 0.04), barkTint())); }
   { const y = Ht * rr(.2, .55), a = R() * 6.283, s = rr(0.7, 1.3);
-    parts.push(part(M.epi, mat4(new V3(Math.cos(a) * r, y, Math.sin(a) * r), R() * 6.283, new V3(s, s * 0.8, s)), tint(rr(.8, 1.1), rr(.9, 1.15), rr(.5, .8)))); }
+    parts.push(part(M.epi, mat4(tr(new V3(Math.cos(a) * r, y, Math.sin(a) * r), y / Ht), R() * 6.283, new V3(s, s * 0.8, s)), tint(rr(.8, 1.1), rr(.9, 1.15), rr(.5, .8)))); }
   addItem(gTrees, parts, r * 3); col(gTrees, r + 0.3, true);
 }
 for (let k = 0; k < nMid; k++) {
@@ -1040,11 +1050,11 @@ for (let k = 0; k < Q.upalm; k++) {
   addItem(gUnder, parts, 0.6 + cs * 3.6); col(gUnder, 0.5 + cs * 0.7, false);
 }
 for (let k = 0; k < Q.fern; k++) {
-  const s = rr(0.7, 1.8), m = k % 2 ? M.fernA : M.fernB, lt = leafTint();
+  const s = rr(0.7, 1.8), m = M.fernV, lt = leafTint();
   addItem(gUnder, [part(m, mat4(new V3(0, -0.03, 0), R() * 6.283, new V3(s, s * rr(.8, 1.1), s)), tint(lt[0], lt[1], lt[2]))], s * 0.3);
 }
 for (let k = 0; k < Q.bigleaf; k++) {
-  const s = rr(1.0, 2.7), m = k % 2 ? M.leafA : M.leafB, lt = leafTint();
+  const s = rr(1.0, 2.7), m = M.leafV, lt = leafTint();
   addItem(gUnder, [part(m, mat4(new V3(0, -0.05, 0), R() * 6.283, new V3(s, s * rr(.85, 1.15), s)), tint(lt[0], lt[1], lt[2]))], s * 1.0);
 }
 // 小道を横切る根（参考写真のイチジク類の根のように、地表をくねって這う）
@@ -1068,14 +1078,14 @@ for (let k = 0; k < Q.bank; k++) {
 }
 const gGround = makeGroup(50, 0.0, 0.15, 5.5); gGround.trample = true; gGround.campR = 2.6;
 for (let k = 0; k < Q.herb; k++) {
-  const s = rr(0.35, 0.85), m = k % 2 ? M.leafA : M.leafB, lt = leafTint();
+  const s = rr(0.35, 0.85), m = M.leafV, lt = leafTint();
   addItem(gGround, [part(m, mat4(new V3(0, -0.03, 0), R() * 6.283, new V3(s, s * rr(.8, 1.2), s)), tint(lt[0], lt[1], lt[2]))], rr(0.25, 0.7));
 }
 for (let k = 0; k < Q.tuft; k++) {
   const s = rr(0.4, 1.15), lt = leafTint().map(v => v * 0.95);
   addItem(gGround, [part(M.tuft, mat4(new V3(0, -0.02, 0), R() * 6.283, new V3(s, s * rr(.7, 1.3), s)), tint(lt[0], lt[1], lt[2]))], rr(0, 0.12));
 }
-for (const k in M) { if (M[k].instanceColor) M[k].instanceColor.needsUpdate = true; }
+for (const k in M) for (const m of (M[k].isVar ? M[k].list : [M[k]])) { if (m.instanceColor) m.instanceColor.needsUpdate = true; m.count = m.userData.n; }
 M.tuft.layers.set(1);
 
 /* ------------------------------------------------------------------ 地面（カメラについて動く） */
@@ -1390,6 +1400,10 @@ let ruinK = null;
 /* ------------------------------------------------------------------ 夜の野営と焚火 */
 const campGroup = new THREE.Group(); campGroup.visible = false; scene.add(campGroup);
 const fireLight = new THREE.PointLight(0xff7a30, 0, 16, 2);
+// 焚火から森側へ影を落とす光（標準・最高画質のみ）
+const fireSpot = new THREE.SpotLight(0xff8a3a, 0, 20, 1.25, 0.7, 2);
+if (!lowQ) { fireSpot.castShadow = true; fireSpot.shadow.mapSize.set(1024, 1024); fireSpot.shadow.camera.near = 0.3; fireSpot.shadow.camera.far = 20; fireSpot.shadow.bias = -0.002; fireSpot.shadow.autoUpdate = false; }
+scene.add(fireSpot, fireSpot.target);
 scene.add(fireLight);
 function coalTex() {
   const c = cv(128, 128), g = c.getContext('2d'), rnd = mulberry(909);
@@ -1488,16 +1502,60 @@ const charMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x120d0a
   // 腰掛け丸太
   const logG = new THREE.CylinderGeometry(0.2, 0.22, 1.9, 12); logG.rotateX(Math.PI / 2);
   const seat = new THREE.Mesh(logG, MAT.bark); seat.position.set(-2.05, 0.14, 0); seat.castShadow = seat.receiveShadow = true; campGroup.add(seat);
-  // テント（入口を焚火へ向ける）
-  const gb = new GB(), L = 2.2, Hh = 1.25, W = 0.95;
-  const v = (x, y, z, u, w) => gb.v(x, y, z, u, w);
-  gb.q(v(0, 0, -W, 0, 0), v(L, 0, -W, 1, 0), v(L, Hh, 0, 1, 1), v(0, Hh, 0, 0, 1));
-  gb.q(v(0, 0, W, 0, 0), v(0, Hh, 0, 0, 1), v(L, Hh, 0, 1, 1), v(L, 0, W, 1, 0));
-  { const a = v(L, 0, -W, 0, 0), b = v(L, 0, W, 1, 0), c = v(L, Hh, 0, .5, 1); gb.i.push(a, b, c); }
-  { const a = v(0, 0, -W, 0, 0), b = v(0, 0, -0.32, .3, 0), c = v(0, Hh, 0, .5, 1); gb.i.push(a, b, c); }
-  { const a = v(0, 0, W, 1, 0), b = v(0, Hh, 0, .5, 1), c = v(0, 0, 0.32, .7, 0); gb.i.push(a, b, c); }
-  const tentMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(0x5e6140).convertSRGBToLinear(), roughness: 0.92, side: THREE.DoubleSide });
-  const tent = new THREE.Mesh(gb.build(), tentMat); tent.position.set(2.7, 0, -1.0); tent.rotation.y = 0.25; tent.castShadow = tent.receiveShadow = true; campGroup.add(tent);
+  // テント（布のたるみ・縫い目・張り綱のある三角テント。入口を焚火へ向ける）
+  const tentTex = (() => {
+    const c = cv(256, 256), g = c.getContext('2d'), rnd = mulberry(777);
+    g.fillStyle = '#6b6a44'; g.fillRect(0, 0, 256, 256);
+    const img = g.getImageData(0, 0, 256, 256), d = img.data;
+    for (let i = 0; i < d.length; i += 4) { const n = (rnd() - .5) * 14; d[i] += n; d[i + 1] += n; d[i + 2] += n * .8; }
+    g.putImageData(img, 0, 0);
+    g.strokeStyle = 'rgba(40,40,20,.18)'; g.lineWidth = 1;
+    for (let k = 0; k <= 256; k += 16) { g.beginPath(); g.moveTo(k, 0); g.lineTo(k, 256); g.stroke(); g.beginPath(); g.moveTo(0, k); g.lineTo(256, k); g.stroke(); }
+    g.strokeStyle = 'rgba(30,30,15,.55)'; g.lineWidth = 3;
+    for (const x of [0, 85, 170, 256]) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, 256); g.stroke(); }
+    const gr = g.createLinearGradient(0, 256, 0, 170); gr.addColorStop(0, 'rgba(60,40,20,.55)'); gr.addColorStop(1, 'rgba(60,40,20,0)'); g.fillStyle = gr; g.fillRect(0, 170, 256, 86);
+    for (let i = 0; i < 25; i++) { g.fillStyle = `rgba(50,35,15,${rnd() * .25})`; g.beginPath(); g.arc(rnd() * 256, 200 + rnd() * 56, 2 + rnd() * 8, 0, 7); g.fill(); }
+    return toTex(c, true);
+  })();
+  const tentMat = new THREE.MeshStandardMaterial({ map: tentTex, bumpMap: tentTex, bumpScale: 0.02, roughness: 0.88, side: THREE.DoubleSide, color: new THREE.Color(0.8, 0.8, 0.75) });
+  const tg = new THREE.Group(); tg.position.set(2.7, 0, -1.0); tg.rotation.y = 0.25; campGroup.add(tg);
+  const TL = 2.3, TH = 1.2, TW = 0.95, NU = 14, NV = 8;
+  const panel = (side) => {
+    const pos = [], uv = [], idx = [];
+    for (let i = 0; i <= NU; i++) for (let j = 0; j <= NV; j++) {
+      const u = i / NU, v = j / NV, x = -0.12 + u * (TL + 0.24) * (0.94 + 0.06 * v) + (1 - v) * 0.0;
+      const ridgeSag = 0.06 * Math.sin(Math.PI * u), sag = 0.07 * Math.sin(Math.PI * v) * Math.sin(Math.PI * Math.min(1, Math.max(0, (x) / TL)));
+      const y = v * (TH - ridgeSag) , zEdge = side * TW * (1 - v) * (1 + 0.04 * Math.sin(u * 20));
+      pos.push(Math.min(TL + 0.12, Math.max(-0.12, x)), Math.max(0, y - sag * 0.4), zEdge - side * sag);
+      uv.push(u * 2.3, v * 1.3);
+    }
+    for (let i = 0; i < NU; i++) for (let j = 0; j < NV; j++) { const a = i * (NV + 1) + j, b = a + NV + 1; idx.push(a, b, a + 1, a + 1, b, b + 1); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals(); return g;
+  };
+  for (const sd of [-1, 1]) { const m = new THREE.Mesh(panel(sd), tentMat); m.castShadow = m.receiveShadow = true; tg.add(m); }
+  { // 奥の三角
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute([TL, 0, -TW, TL, 0, TW, TL, TH - 0.02, 0], 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, .5, 1], 2)); g.computeVertexNormals();
+    const m = new THREE.Mesh(g, tentMat); m.castShadow = m.receiveShadow = true; tg.add(m);
+  }
+  for (const sd of [-1, 1]) { // 半分開いた入口の布
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, sd * TW, sd * 0.1 - 0.25, 0, sd * 0.42, 0, TH, 0], 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, .5, 1], 2)); g.computeVertexNormals();
+    const m = new THREE.Mesh(g, tentMat); m.castShadow = true; tg.add(m);
+  }
+  { // 中の暗がりと敷物
+    const inner = new THREE.Mesh(new THREE.PlaneGeometry(TL - 0.1, TW * 1.8), new THREE.MeshStandardMaterial({ color: 0x0b0a08, roughness: 1 })); inner.rotation.x = -Math.PI / 2; inner.position.set(TL / 2, 0.02, 0); tg.add(inner);
+  }
+  { // ポール・張り綱・ペグ
+    const poleM = new THREE.MeshStandardMaterial({ color: 0x2a2a28, roughness: 0.5, metalness: 0.6 }), poleG = new THREE.CylinderGeometry(0.012, 0.012, TH + 0.12, 6);
+    for (const x of [-0.05, TL + 0.05]) { const p = new THREE.Mesh(poleG, poleM); p.position.set(x, (TH + 0.12) / 2, 0); tg.add(p); }
+    const pts = [], pegG = new THREE.CylinderGeometry(0.012, 0.006, 0.18, 5), pegM = new THREE.MeshStandardMaterial({ color: 0x777066, roughness: 0.4, metalness: 0.7 });
+    for (const [x0, x1, z1] of [[-0.05, -0.9, 0], [TL + 0.05, TL + 0.9, 0], [TL * 0.5, TL * 0.5, 1.55], [TL * 0.5, TL * 0.5, -1.55]]) {
+      const y0 = x0 === TL * 0.5 ? TH * 0.62 : TH + 0.1, z0 = x0 === TL * 0.5 ? Math.sign(z1) * TW * 0.4 : 0;
+      pts.push(x0, y0, z0, x1, 0.04, z1);
+      const peg = new THREE.Mesh(pegG, pegM); peg.position.set(x1, 0.05, z1); peg.rotation.z = 0.3 * Math.sign(x1 - x0 || 0.001); tg.add(peg);
+    }
+    const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    tg.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: new THREE.Color(0x6a6048).convertSRGBToLinear() })));
+  }
   // 荷物と鍋
   const pack = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.5, 0.24), new THREE.MeshStandardMaterial({ color: new THREE.Color(0x4a3a28).convertSRGBToLinear(), roughness: 0.9 }));
   pack.position.set(-1.9, 0.25, 1.15); pack.rotation.y = 0.4; pack.castShadow = true; campGroup.add(pack);
@@ -1592,11 +1650,14 @@ function campTick(night, dt) {
 }
 const FA = { amp: 0, pan: 0 };
 function fireUpdate(dt) {
-  if (!camp.on) { FA.amp = 0; return; }
+  if (!camp.on) { FA.amp = 0; fireSpot.intensity = 0; if (!lowQ) fireSpot.shadow.autoUpdate = false; return; }
   const L = camp.level, fl = 0.8 + 0.12 * Math.sin(T * 13.1) + 0.08 * Math.sin(T * 23.7 + 1.3) + 0.1 * (vnoise(T * 6, 3.3) - 0.5) * 2;
   flameU.uTime.value = T; flameU.uLevel.value = Math.min(1, L * 1.1);
   fireLight.position.set(camp.x + Math.sin(T * 7) * 0.05, camp.y + 1.2 + Math.sin(T * 9) * 0.04, camp.z);
-  fireLight.intensity = L * 1.15 * fl;
+  fireLight.intensity = L * (lowQ ? 1.15 : 0.7) * fl;
+  { const ax = camp.x - camp.seatX, az = camp.z - camp.seatZ, al = Math.hypot(ax, az) || 1;
+    fireSpot.position.set(camp.x, camp.y + 0.9, camp.z); fireSpot.target.position.set(camp.x + ax / al * 6, camp.y - 0.3, camp.z + az / al * 6); fireSpot.target.updateMatrixWorld();
+    fireSpot.intensity = lowQ ? 0 : L * 1.6 * fl; if (!lowQ) { fireSpot.shadow.autoUpdate = L > 0.02; fireSpot.shadow.needsUpdate = L > 0.02; } }
   fireGlow.material.opacity = L * 0.16 * fl;
   coalMat.emissiveIntensity = (0.15 + L * 0.8) * fl * (camp.level > 0.01 ? 1 : 0);
   charMat.emissiveIntensity = (0.1 + L * 1.1) * fl;
@@ -2013,17 +2074,6 @@ function audioTick(S) {
   AU.rainMidG.gain.setTargetAtTime(rain * rain * 0.1, now, 1.2);
   AU.rainLoG.gain.setTargetAtTime(rain * rain * 0.35, now, 1.5);
   for (let k = 0; k < 3; k++) if (R_(rain * 22)) { const o = emit(0.6, 6, 0.2, 3, 0.2, 'env'); burst(o, now + rnd() * .05, rrr(.004, .018), 'bandpass', rrr(1200, 4500), 2.5, rrr(.2, .6)); }
-  if (rain > 0.55 && now > (AU.busy.thunder || 0) && R_(0.05 * rain)) {
-    const far = rnd() < 0.7, t0 = now + rrr(0.1, 0.5), dur = far ? rrr(4, 8) : rrr(3, 6), o = emit(far ? 800 : 200, far ? 2500 : 700, 300, 800, 1.6, 'env');
-    if (!far) burst(o, t0, 0.25, 'highpass', 900, 0.6, 18, { att: .002 });
-    const s0 = c.createBufferSource(); s0.buffer = AU.brown; s0.loop = true;
-    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(far ? 350 : 1200, t0); lp.frequency.exponentialRampToValueAtTime(90, t0 + dur);
-    const e = c.createGain(), pk = far ? rrr(40, 80) : rrr(60, 110);
-    const N = 64, cur = new Float32Array(N); for (let i = 0; i < N; i++) { const x = i / (N - 1); cur[i] = Math.max(0.0001, pk * Math.pow(1 - x, 1.6) * (0.6 + 0.4 * Math.sin(x * 23 + rnd() * 2) ** 2) * Math.min(1, x * 12)); }
-    e.gain.setValueAtTime(0.0001, t0); e.gain.setValueCurveAtTime(cur, t0 + 0.01, dur);
-    s0.connect(lp).connect(e).connect(o); s0.start(t0, rnd() * 3); s0.stop(t0 + dur + 0.2);
-    AU.busy.thunder = t0 + dur + rrr(6, 20);
-  }
   // 川
   AU.rivG.gain.setTargetAtTime(S.prox * 0.9, now, 0.5);
   AU.babG.gain.setTargetAtTime(S.prox * (0.08 + 0.08 * rnd()), now, 0.08);
@@ -2083,6 +2133,37 @@ function audioTick(S) {
       }
     }
   }
+}
+// イベントの効果音
+function thunderSound(far, delay) {
+  if (!AU.on || !AU.ctx) return;
+  const c = AU.ctx, t0 = c.currentTime + delay, dur = far ? rrr(4, 8) : rrr(3, 6), o = emit(far ? 800 : 200, far ? 2500 : 700, 300, 800, 1.6, 'env');
+  if (!far) burst(o, t0, 0.25, 'highpass', 900, 0.6, 18, { att: .002 });
+  const s0 = c.createBufferSource(); s0.buffer = AU.brown; s0.loop = true;
+  const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(far ? 350 : 1200, t0); lp.frequency.exponentialRampToValueAtTime(90, t0 + dur);
+  const e = c.createGain(), pk = far ? rrr(40, 80) : rrr(60, 110);
+  const N = 64, cur = new Float32Array(N); for (let i = 0; i < N; i++) { const x = i / (N - 1); cur[i] = Math.max(0.0001, pk * Math.pow(1 - x, 1.6) * (0.6 + 0.4 * Math.sin(x * 23 + rnd() * 2) ** 2) * Math.min(1, x * 12)); }
+  e.gain.setValueAtTime(0.0001, t0); e.gain.setValueCurveAtTime(cur, t0 + 0.01, dur);
+  s0.connect(lp).connect(e).connect(o); s0.start(t0, rnd() * 3); s0.stop(t0 + dur + 0.2);
+}
+function sfxFlush(dx, dy, dz) {
+  if (!AU.on || !AU.ctx) return;
+  const c = AU.ctx, t = c.currentTime, o = spatial(dx, dy, dz, 0.9);
+  for (let i = 0; i < 40; i++) burst(o, t + rnd() * 1.4 * Math.pow(rnd(), 0.6), rrr(.02, .05), 'bandpass', rrr(500, 1400), 1.2, rrr(.4, 1.1), { buf: AU.pink });
+  for (let i = 0; i < 4; i++) { const f = rrr(1500, 2600); note(o, t + rrr(0, 1.2), .2, [[0, f], [.3, f * 1.3], [1, f * .8]], .35, { type: 'sawtooth', filter: [2200, 1.5] }); }
+}
+function sfxSnap(dx, dz, n) {
+  if (!AU.on || !AU.ctx) return;
+  const c = AU.ctx, o = spatial(dx, 0.3, dz, 0.8); let t = c.currentTime + 0.05;
+  for (let i = 0; i < n; i++) { burst(o, t, rrr(.006, .014), 'highpass', rrr(1800, 3500), .8, rrr(1.2, 2.2)); burst(o, t + .01, rrr(.03, .06), 'bandpass', rrr(700, 1300), 1.5, rrr(.3, .6)); t += rrr(.25, .9); }
+  burst(o, t, rrr(.3, .6), 'bandpass', rrr(2000, 3500), .7, rrr(.15, .35), { att: .05, buf: AU.pink });
+}
+function sfxDolphin(dx, dz) {
+  if (!AU.on || !AU.ctx) return;
+  const c = AU.ctx, t = c.currentTime + 0.05, o = spatial(dx, -0.3, dz, 0.7, false, 'env');
+  burst(o, t, 0.4, 'bandpass', 1500, 0.8, 1.0, { att: .01 });
+  burst(o, t + 0.12, 0.35, 'lowpass', 700, 0.7, 2.2, { att: .015, buf: AU.pink });
+  burst(o, t + 1.1, 0.6, 'bandpass', 900, 0.6, 0.5, { att: .05 });
 }
 function setSound(on) {
   if (on && !audioInit()) return;
@@ -2244,6 +2325,241 @@ function updateRain(dt) {
   rainGeo.attributes.position.needsUpdate = true;
 }
 
+/* ------------------------------------------------------------------ 森のイベント（低い確率で、条件に合うときだけ起きる） */
+const EV = { mist: 0, gustT: -99, gustK: 0, flash: 0, flashQ: [], thunderNext: 0, cool: {}, lift: 0, logSlow: 1 };
+const evReady = k => (EV.cool[k] || 0) < T;
+const evGo = (k, perSec, dt, cond, cd) => { if (cond && evReady(k) && Math.random() < perSec * dt) { EV.cool[k] = T + cd; return true; } return false; };
+const V3a = new V3(), V3b = new V3();
+function camFwd() { return V3a.set(-Math.sin(camera.rotation.y), 0, -Math.cos(camera.rotation.y)); }
+
+// 落ち葉（常に少し、突風のときはたくさん）
+const leafTex = (() => {
+  const c = cv(64, 64), g = c.getContext('2d');
+  g.translate(32, 60); leafPath(g, 56, 20); g.fillStyle = '#fff'; g.fill();
+  g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 2; g.beginPath(); g.moveTo(0, 0); g.lineTo(0, 52); g.stroke();
+  return toTex(c);
+})();
+const LN = lowQ ? 50 : 110, leafGeo = new THREE.PlaneGeometry(0.075, 0.12);
+const leafMesh = new THREE.InstancedMesh(leafGeo, new THREE.MeshStandardMaterial({ map: leafTex, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.8 }), LN);
+leafMesh.frustumCulled = false; leafMesh.castShadow = false; scene.add(leafMesh);
+const leaves = [];
+const LCOL = [[.78, .6, .22], [.6, .42, .18], [.55, .62, .2], [.85, .72, .3], [.42, .3, .15]].map(a => new THREE.Color(a[0], a[1], a[2]).convertSRGBToLinear());
+for (let i = 0; i < LN; i++) { leaves.push({ on: false, p: new V3(), vy: 0, ph: 0, sp: 0, rx: 0, ry: 0 }); leafMesh.setMatrixAt(i, ZERO); leafMesh.setColorAt(i, LCOL[i % LCOL.length]); }
+leafMesh.instanceColor.needsUpdate = true;
+let leafAcc = 0;
+const _lm = new THREE.Matrix4(), _lq = new THREE.Quaternion(), _le = new THREE.Euler(), _ls = new V3(1, 1, 1);
+function updateLeaves(dt, rate) {
+  leafAcc += rate * dt;
+  const cp = camera.position;
+  for (let i = 0; i < LN; i++) {
+    const L = leaves[i];
+    if (!L.on) {
+      if (leafAcc >= 1) {
+        leafAcc -= 1; L.on = true;
+        const a = Math.random() * 6.283, d = 1 + Math.random() * 9;
+        L.p.set(cp.x + Math.sin(a) * d, cp.y + 5 + Math.random() * 9, cp.z + Math.cos(a) * d);
+        L.vy = 0.55 + Math.random() * 0.5; L.ph = Math.random() * 9; L.sp = 2 + Math.random() * 4; L.rx = Math.random() * 6; L.ry = Math.random() * 6;
+      } else { continue; }
+    }
+    const w = 0.6 + EV.gustK * 2.5;
+    L.p.x += (Math.sin(T * 1.3 + L.ph) * 0.5 + 0.35 * w) * dt; L.p.z += (Math.cos(T * 1.1 + L.ph) * 0.4 + 0.2 * w) * dt;
+    L.p.y -= L.vy * (0.7 + 0.5 * Math.abs(Math.sin(T * L.sp * 0.5 + L.ph))) * dt;
+    L.rx += dt * L.sp; L.ry += dt * L.sp * 0.7;
+    const gy = H(L.p.x, L.p.z);
+    if (L.p.y < gy + 0.02) { L.on = false; leafMesh.setMatrixAt(i, ZERO); continue; }
+    _le.set(L.rx, L.ry, Math.sin(T * 2 + L.ph)); _lq.setFromEuler(_le);
+    _lm.compose(L.p, _lq, _ls); leafMesh.setMatrixAt(i, _lm);
+  }
+  leafMesh.instanceMatrix.needsUpdate = true;
+}
+
+// 鳥の群れが飛び立つ
+const BN = 14, wingGeo = new THREE.BufferGeometry();
+wingGeo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, -0.12, 0.55, 0, -0.03, 0.5, 0, 0.08, 0, 0, 0.16], 3));
+wingGeo.setIndex([0, 1, 2, 0, 2, 3]); wingGeo.computeVertexNormals();
+const birdMesh = new THREE.InstancedMesh(wingGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(0x14120e).convertSRGBToLinear(), side: THREE.DoubleSide }), BN * 2);
+birdMesh.frustumCulled = false; scene.add(birdMesh);
+for (let i = 0; i < BN * 2; i++) birdMesh.setMatrixAt(i, ZERO);
+const flock = { on: false, t: 0, birds: [] };
+for (let i = 0; i < BN; i++) flock.birds.push({ p: new V3(), v: new V3(), f: 0, ph: 0 });
+function startFlock() {
+  const f = camFwd(), cp = camera.position, side = (Math.random() - .5) * 16, dist = 12 + Math.random() * 10;
+  const ox = cp.x + f.x * dist - f.z * side, oz = cp.z + f.z * dist + f.x * side, oy = H(ox, oz) + 7 + Math.random() * 7;
+  const away = Math.atan2(ox - cp.x, oz - cp.z) + (Math.random() < .5 ? -1 : 1) * (0.9 + Math.random() * 0.6);
+  for (const b of flock.birds) {
+    b.p.set(ox + (Math.random() - .5) * 5, oy + Math.random() * 2, oz + (Math.random() - .5) * 5);
+    const sp = 5 + Math.random() * 2.5, a = away + (Math.random() - .5) * 0.5;
+    b.v.set(Math.sin(a) * sp, 2 + Math.random() * 2, Math.cos(a) * sp);
+    b.f = 7 + Math.random() * 4; b.ph = Math.random() * 6;
+  }
+  flock.on = true; flock.t = 0;
+  sfxFlush(ox - cp.x, oy - cp.y, oz - cp.z);
+}
+function updateFlock(dt) {
+  if (!flock.on) return;
+  flock.t += dt;
+  for (let i = 0; i < BN; i++) {
+    const b = flock.birds[i];
+    b.p.addScaledVector(b.v, dt); b.v.y *= (1 - dt * 0.3);
+    const yaw = Math.atan2(b.v.x, b.v.z), flap = Math.sin(T * b.f * 6.283 + b.ph) * 0.9;
+    for (let s = 0; s < 2; s++) {
+      _le.set(0, yaw, (s ? -1 : 1) * flap, 'YXZ'); _lq.setFromEuler(_le);
+      _ls.set(s ? -1 : 1, 1, 1); _lm.compose(b.p, _lq, _ls); birdMesh.setMatrixAt(i * 2 + s, _lm);
+    }
+  }
+  _ls.set(1, 1, 1);
+  if (flock.t > 9) { flock.on = false; for (let i = 0; i < BN * 2; i++) birdMesh.setMatrixAt(i, ZERO); }
+  birdMesh.instanceMatrix.needsUpdate = true;
+}
+
+// モルフォ蝶（青く光る大きな蝶が小道を横切る）
+const morphoTex = (() => {
+  const c = cv(128, 128), g = c.getContext('2d');
+  g.beginPath(); g.moveTo(0, 64); g.bezierCurveTo(30, -10, 125, 0, 120, 55); g.bezierCurveTo(128, 90, 90, 128, 45, 118); g.bezierCurveTo(20, 112, 4, 90, 0, 64); g.closePath();
+  g.fillStyle = '#0a0a12'; g.fill(); g.save(); g.clip();
+  const gr = g.createRadialGradient(20, 64, 5, 30, 64, 105); gr.addColorStop(0, '#6fd8ff'); gr.addColorStop(0.45, '#1f7fe8'); gr.addColorStop(0.75, '#0b3aa8'); gr.addColorStop(0.9, 'rgba(10,10,20,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  g.fillStyle = 'rgba(255,255,255,.8)'; for (const [x, y] of [[105, 40], [110, 58], [96, 96], [80, 108]]) { g.beginPath(); g.arc(x, y, 2.5, 0, 7); g.fill(); }
+  g.restore(); return toTex(c);
+})();
+const morpho = new THREE.Group(), wingG = new THREE.PlaneGeometry(0.1, 0.1); wingG.translate(0.05, 0, 0);
+const wMat = new THREE.MeshStandardMaterial({ map: morphoTex, alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.3, emissive: new THREE.Color(0.05, 0.25, 0.9), emissiveMap: morphoTex, emissiveIntensity: 0.6 });
+const wL = new THREE.Mesh(wingG, wMat), wR = new THREE.Mesh(wingG, wMat); wR.scale.x = -1; wL.rotation.x = wR.rotation.x = -Math.PI / 2;
+const wLp = new THREE.Group(), wRp = new THREE.Group(); wLp.add(wL); wRp.add(wR); morpho.add(wLp, wRp); morpho.visible = false; scene.add(morpho);
+const bfly = { on: false, t: 0, a: new V3(), b: new V3(), dur: 7 };
+function startMorpho() {
+  const f = camFwd(), cp = camera.position, fw = 2.5 + Math.random() * 3, s = Math.random() < .5 ? -1 : 1;
+  bfly.a.set(cp.x + f.x * fw + f.z * 4 * s, 0, cp.z + f.z * fw - f.x * 4 * s);
+  bfly.b.set(cp.x + f.x * (fw + 4) - f.z * 4 * s, 0, cp.z + f.z * (fw + 4) + f.x * 4 * s);
+  bfly.on = true; bfly.t = 0; bfly.dur = 6 + Math.random() * 3; morpho.visible = true;
+}
+function updateMorpho(dt) {
+  if (!bfly.on) return;
+  bfly.t += dt; const k = bfly.t / bfly.dur;
+  if (k >= 1) { bfly.on = false; morpho.visible = false; return; }
+  const x = bfly.a.x + (bfly.b.x - bfly.a.x) * k + Math.sin(bfly.t * 2.3) * 0.6, z = bfly.a.z + (bfly.b.z - bfly.a.z) * k + Math.cos(bfly.t * 1.7) * 0.6;
+  const y = camera.position.y - 0.35 + 0.35 * Math.sin(bfly.t * 1.9) + 0.12 * Math.sin(bfly.t * 9);
+  morpho.position.set(x, y, z); morpho.rotation.y = Math.atan2(bfly.b.x - bfly.a.x, bfly.b.z - bfly.a.z) + Math.PI / 2 * 0;
+  const fl = 0.15 + 1.1 * Math.abs(Math.sin(bfly.t * 11));
+  wLp.rotation.z = fl; wRp.rotation.z = -fl;
+}
+
+// 小道をふさぐ倒木（またいで越える）
+const fallenMesh = new THREE.Mesh(logGeo(), MAT.log); fallenMesh.castShadow = fallenMesh.receiveShadow = true; fallenMesh.visible = false; scene.add(fallenMesh);
+const FL = { k: null, x: 0, y: 0, z: 0, ang: 0, r: 0.4, len: 11 };
+function fallenOf(k) {
+  if (hash2(k, 61) > 0.5) return null;
+  const z = -k * 280 - 60 - hash2(k, 62) * 160;
+  if (Math.abs(nearestSite(z).z - z) < 35) return null;
+  return { k, z, x: pathX(z), ang: (hash2(k, 63) - .5) * 0.7, r: 0.3 + hash2(k, 64) * 0.2, len: 9 + hash2(k, 65) * 5 };
+}
+function updateFallen(dt) {
+  const k0 = Math.round((-st.z - 140) / 280);
+  let best = null;
+  for (let k = k0 - 1; k <= k0 + 1; k++) { const f = fallenOf(k); if (f && (!best || Math.abs(f.z - st.z) < Math.abs(best.z - st.z))) best = f; }
+  if (!best || Math.abs(best.z - st.z) > 90) { fallenMesh.visible = false; EV.lift += (0 - EV.lift) * Math.min(1, dt * 4); EV.logSlow = 1; return; }
+  if (FL.k !== best.k) {
+    Object.assign(FL, best); FL.y = H(FL.x, FL.z) + FL.r * 0.7;
+    fallenMesh.position.set(FL.x, FL.y, FL.z); fallenMesh.rotation.set(0, FL.ang, 0); fallenMesh.scale.set(FL.len, FL.r, FL.r); fallenMesh.visible = true;
+  }
+  const dx = st.x - FL.x, dz = st.z - FL.z, n = Math.abs(dx * Math.sin(FL.ang) + dz * Math.cos(FL.ang)), along = Math.abs(dx * Math.cos(FL.ang) - dz * Math.sin(FL.ang));
+  const on = along < FL.len / 2 ? sstep(FL.r + 0.7, 0, n) : 0;
+  EV.lift += (FL.r * 1.6 * on - EV.lift) * Math.min(1, dt * 5);
+  EV.logSlow = along < FL.len / 2 && n < FL.r + 1.4 ? 0.55 : 1;
+}
+
+// 雷の稲光
+function startThunder(far) {
+  EV.flashQ.push({ t: T, k: far ? 0.35 : 1 }, { t: T + 0.1 + Math.random() * 0.15, k: far ? 0.2 : 0.7 });
+  thunderSound(far, far ? 2 + Math.random() * 3 : 0.1 + Math.random() * 0.4);
+}
+function updateFlash(dt) {
+  EV.flash *= Math.exp(-dt * 14);
+  EV.flashQ = EV.flashQ.filter(q => { if (T >= q.t) { EV.flash = Math.max(EV.flash, q.k); return false; } return true; });
+}
+
+// 夜の遠い灯り・獣の目
+function glowSprite(col, sc) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: TX.dot, color: col, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, opacity: 0 })); s.scale.set(sc, sc, 1); s.visible = false; scene.add(s); return s; }
+const farLight = glowSprite(0xffb860, 0.9), farState = { on: false, t: 0, dur: 30 };
+const eyes = [glowSprite(0xd8ff80, 0.08), glowSprite(0xd8ff80, 0.08)], eyeState = { on: false, t: 0, dur: 3 };
+function startFarLight() {
+  const f = camFwd(), cp = camera.position, a = (Math.random() - .5) * 2.2, d = 40 + Math.random() * 30;
+  const c = Math.cos(a), sn = Math.sin(a), x = cp.x + (f.x * c - f.z * sn) * d, z = cp.z + (f.z * c + f.x * sn) * d;
+  farLight.position.set(x, H(x, z) + 0.8 + Math.random() * 1.2, z); farLight.visible = true; farState.on = true; farState.t = 0; farState.dur = 20 + Math.random() * 20;
+}
+function startEyes() {
+  const f = camFwd(), cp = camera.position, a = (Math.random() - .5) * 0.8, d = 7 + Math.random() * 7;
+  const c = Math.cos(a), sn = Math.sin(a), dx = f.x * c - f.z * sn, dz = f.z * c + f.x * sn, x = cp.x + dx * d, z = cp.z + dz * d, y = H(x, z) + 0.35 + Math.random() * 0.7;
+  eyes[0].position.set(x - dz * 0.05, y, z + dx * 0.05); eyes[1].position.set(x + dz * 0.05, y, z - dx * 0.05);
+  eyes.forEach(e => e.visible = true); eyeState.on = true; eyeState.t = 0; eyeState.dur = 2.5 + Math.random() * 2; eyeState.dx = x - cp.x; eyeState.dz = z - cp.z;
+}
+function updateGlows(dt) {
+  if (farState.on) {
+    farState.t += dt; const k = farState.t / farState.dur;
+    if (k >= 1) { farState.on = false; farLight.visible = false; }
+    else farLight.material.opacity = sstep(0, 0.12, k) * (1 - sstep(0.85, 1, k)) * (0.55 + 0.25 * Math.sin(T * 5.3) * Math.sin(T * 2.1));
+  }
+  if (eyeState.on) {
+    eyeState.t += dt; const k = eyeState.t / eyeState.dur, blink = Math.abs(k - 0.55) < 0.04 ? 0 : 1;
+    const o = sstep(0, 0.1, k) * (1 - sstep(0.9, 1, k)) * blink * Math.max(0.25, lampL);
+    eyes.forEach(e => e.material.opacity = o);
+    if (k >= 1) { eyeState.on = false; eyes.forEach(e => e.visible = false); sfxSnap(eyeState.dx, eyeState.dz, 2); }
+  }
+}
+
+// 川のイルカ（息つぎの音と水面の波紋、ピンクの背中）
+const rings = [0, 1].map(() => { const m = new THREE.Mesh(new THREE.RingGeometry(0.92, 1, 48), new THREE.MeshBasicMaterial({ color: 0xd8d0c0, transparent: true, opacity: 0, depthWrite: false })); m.rotation.x = -Math.PI / 2; m.visible = false; scene.add(m); return m; });
+const dolBack = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), new THREE.MeshStandardMaterial({ color: new THREE.Color(0xb08a88).convertSRGBToLinear(), roughness: 0.35 }));
+dolBack.scale.set(0.9, 0.22, 0.28); dolBack.visible = false; scene.add(dolBack);
+const dol = { on: false, t: 0, x: 0, y: 0, z: 0, yaw: 0 };
+function startDolphin() {
+  const z = st.z - 4 - Math.random() * 14, hw = riverHW(z), x = riverX(z) + (Math.random() - .5) * hw * 1.1;
+  Object.assign(dol, { on: true, t: 0, x, y: waterY(z), z, yaw: Math.random() * 6.28 });
+  rings.forEach(r => { r.position.set(x, dol.y + 0.03, z); r.visible = true; });
+  dolBack.visible = true; dolBack.rotation.y = dol.yaw;
+  sfxDolphin(x - st.x, z - st.z);
+}
+function updateDolphin(dt) {
+  if (!dol.on) return;
+  dol.t += dt;
+  const b = dol.t < 1.4 ? Math.sin(Math.PI * dol.t / 1.4) : 0;
+  dolBack.position.set(dol.x + Math.sin(dol.yaw) * dol.t * 0.6, dol.y - 0.18 + b * 0.26, dol.z + Math.cos(dol.yaw) * dol.t * 0.6);
+  dolBack.visible = b > 0.02;
+  rings.forEach((r, i) => { const t = dol.t - i * 0.6; const s = 0.2 + Math.max(0, t) * 1.1; r.scale.set(s, s, 1); r.material.opacity = t > 0 ? 0.3 * Math.max(0, 1 - t / 3.2) : 0; });
+  if (dol.t > 4.5) { dol.on = false; rings.forEach(r => r.visible = false); dolBack.visible = false; }
+}
+
+function updateEvents(dt, night, prox) {
+  const h = hour, day = h > 6.2 && h < 17.8, dry = rainL < 0.2, walking = !(walkMode === 'camp' && camp.sat);
+  // 朝霧：日によって濃い霧が出て、日が高くなると晴れる
+  const mistDay = hash2(dayN, 21) < 0.5 ? 1 : 0.25;
+  const mistT = mistDay * sstep(4.2, 5.4, h) * (1 - sstep(7.6, 9.6, h));
+  EV.mist += (mistT - EV.mist) * Math.min(1, dt * 0.2);
+  // 突風
+  if (evGo('gust', 1 / 100, dt, true, 55)) EV.gustT = T;
+  const gt = T - EV.gustT; EV.gustK = gt >= 0 && gt < 7 ? Math.sin(Math.PI * gt / 7) : 0;
+  updateLeaves(dt, (day ? 0.5 : 0.12) + EV.gustK * 28 + rainL * 3);
+  // 鳥の群れ・モルフォ蝶
+  if (!flock.on && evGo('flock', 1 / 110, dt, day && dry, 45)) startFlock();
+  updateFlock(dt);
+  if (!bfly.on && evGo('morpho', 1 / 120, dt, day && dry && walking, 50)) startMorpho();
+  updateMorpho(dt);
+  // 倒木
+  updateFallen(dt);
+  // 雷と稲光
+  if (rainL > 0.55 && T > EV.thunderNext && Math.random() < 0.05 * rainL * dt) { const far = Math.random() < 0.7; startThunder(far); EV.thunderNext = T + (far ? 8 : 6) + Math.random() * 16; }
+  updateFlash(dt);
+  // 夜の遠い灯り・獣の目・物音
+  const deep = h >= 20 || h < 4.6;
+  if (!farState.on && evGo('farlight', 1 / 180, dt, deep && dry, 140)) startFarLight();
+  if (!eyeState.on && evGo('eyes', 1 / 70, dt, night && lampL > 0.4, 40)) startEyes();
+  if (evGo('snap', 1 / 35, dt, night, 14)) { const a = Math.random() * 6.28, d = 6 + Math.random() * 16; sfxSnap(Math.sin(a) * d, Math.cos(a) * d, 1 + (Math.random() * 3 | 0)); }
+  updateGlows(dt);
+  // 川のイルカ
+  if (!dol.on && evGo('dolphin', 1 / 70, dt, prox > 0.35 && h > 6.5 && h < 19, 60)) startDolphin();
+  updateDolphin(dt);
+}
+
 /* ------------------------------------------------------------------ メインループ */
 const sunDir = new V3(), moonDir = new V3(), lightDir = new V3(), fwd = new V3(), tmpV = new V3(), right = new V3();
 const lx = new V3(), ly = new V3(), glow = new THREE.Color();
@@ -2261,7 +2577,7 @@ function frame(now) {
 
   // 風
   const gust = clamp(0.35 + 0.65 * vnoise(T * 0.12, 3.7) * (0.6 + 0.4 * Math.sin(T * 0.05)), 0, 1);
-  U.uTime.value = T; U.uWind.value = 0.35 + gust * 1.1 + rainL * 0.9;
+  U.uTime.value = T; U.uWind.value = 0.35 + gust * 1.1 + rainL * 0.9 + EV.gustK * 1.8;
 
   // 歩行
   const manualMove = keys.size > 0;
@@ -2342,6 +2658,7 @@ function frame(now) {
     const l = fwd.length();
     if (l > 0) { fwd.divideScalar(l); target = 1.4; }
   }
+  target *= EV.logSlow;
   st.speed += (target - st.speed) * Math.min(1, dt * 2.2);
   if (st.speed > 0.001) { st.x += fwd.x * st.speed * dt; st.z += fwd.z * st.speed * dt; st.dist += st.speed * dt; }
   pushOut();
@@ -2362,8 +2679,12 @@ function frame(now) {
   const yaw = st.yaw + userYaw + lookYaw;
   const pitch = clamp((sitting ? -0.2 : -0.05) + userPitch + lookPitch, -1.2, 1.3);
   right.set(Math.cos(yaw), 0, -Math.sin(yaw));
-  camera.position.set(st.x + right.x * bobX, st.y + eyeH + bobY, st.z + right.z * bobX);
+  camera.position.set(st.x + right.x * bobX, st.y + eyeH + bobY + EV.lift, st.z + right.z * bobX);
   camera.rotation.set(pitch + bobY * 0.15, yaw, bobX * 0.25 * (reduceMotion ? 0 : 1));
+  { const want = (hour >= 18.9 || hour < 5.7) && !(walkMode === 'camp' && camp.sat && !manual) ? 1 : 0;
+    lampL += (want - lampL) * Math.min(1, dt * (want ? 0.8 : 1.5));
+    headLamp.intensity = lampL * 2.0 * (0.97 + 0.03 * Math.sin(T * 3.1) * Math.sin(T * 7.7));
+  }
 
   updateGroups(st.x, st.z);
   updateGround(st.x, st.z);
@@ -2388,9 +2709,10 @@ function frame(now) {
   if (sunDir.y > 0) { lightDir.copy(sunDir); lf = sstep(0, 0.09, sunDir.y); }
   else { lightDir.copy(moonDir); lf = sstep(0, 0.09, moonDir.y); }
   sun.color.copy(env.sun); sun.intensity = env.sunI * lf * (1 - 0.75 * rainL);
-  hemi.color.copy(env.hs); hemi.groundColor.copy(env.hg); hemi.intensity = env.hI * (1 - 0.3 * rainL);
+  hemi.color.copy(env.hs); hemi.groundColor.copy(env.hg); hemi.intensity = env.hI * (1 - 0.3 * rainL) + EV.flash * 2.2;
   renderer.toneMappingExposure = env.exp;
-  scene.fog.color.copy(env.fog).multiplyScalar(1 - 0.35 * rainL); scene.fog.density = env.fogD * (1 + 0.8 * rainL);
+  scene.fog.color.copy(env.fog).multiplyScalar(1 - 0.35 * rainL).lerp(env.hor, 0.35 * EV.mist); scene.fog.density = env.fogD * (1 + 0.8 * rainL) * (1 + 2.3 * EV.mist);
+  if (EV.flash > 0.01) scene.fog.color.lerp(new THREE.Color(0.7, 0.75, 0.9), EV.flash * 0.6);
   updateRain(dt);
 
   // 影カメラ：前方中心、テクセル単位でスナップしてチラつきを抑える
@@ -2405,7 +2727,7 @@ function frame(now) {
 
   // 空
   sky.position.copy(camera.position);
-  skyMat.uniforms.top.value.copy(env.top).lerp(env.fog, 0.6 * rainL).multiplyScalar(1 - 0.45 * rainL); skyMat.uniforms.hor.value.copy(env.hor).multiplyScalar(1 - 0.4 * rainL); skyMat.uniforms.fogc.value.copy(env.fog);
+  skyMat.uniforms.top.value.copy(env.top).lerp(env.fog, 0.6 * rainL).multiplyScalar(1 - 0.45 * rainL); skyMat.uniforms.hor.value.copy(env.hor).multiplyScalar(1 - 0.4 * rainL + EV.flash * 3); skyMat.uniforms.fogc.value.copy(env.fog);
   skyMat.uniforms.sunCol.value.copy(env.sun); skyMat.uniforms.sunDir.value.copy(sunDir); skyMat.uniforms.moonDir.value.copy(moonDir);
   skyMat.uniforms.sunVis.value = sstep(-0.05, 0.05, sunDir.y); skyMat.uniforms.night.value = env.night;
 
@@ -2415,7 +2737,7 @@ function frame(now) {
   for (const m of glowMats) m.emissive.copy(glow);
 
   // 光の筋
-  const rayK = env.rays * (sunDir.y > 0 ? lf : 0) * (1 - rainL);
+  const rayK = env.rays * (sunDir.y > 0 ? lf : 0) * (1 - rainL) * (1 + 0.9 * EV.mist);
   const cam = camera.position;
   for (const s of shafts) {
     if (!shaftsInit) placeShaft(s, cam, fwd, true);
@@ -2475,8 +2797,9 @@ function frame(now) {
   {
     const dw = Math.max(0, Math.abs(riverX(st.z) - st.x) - riverHW(st.z));
     const prox = 1 - sstep(1.5, 32, dw);
+    updateEvents(dt, hour >= 19.3 || hour < 5.5, prox);
     fireUpdate(dt);
-    audioTick({ hour, dt, gust: Math.min(1, gust + rainL * 0.5), rain: rainL, prox, rdx: riverX(st.z) - st.x, fireL: camp.on ? camp.level : 0, fdx: camp.x - st.x, fdz: camp.z - st.z, yaw });
+    audioTick({ hour, dt, gust: Math.min(1, gust + rainL * 0.5 + EV.gustK * 0.8), rain: rainL, prox, rdx: riverX(st.z) - st.x, fireL: camp.on ? camp.level : 0, fdx: camp.x - st.x, fdz: camp.z - st.z, yaw });
   }
 
   // 川面の値
@@ -2523,7 +2846,7 @@ function frame(now) {
     hudAcc = 0;
     const hh = Math.floor(hour), mm = Math.floor((hour - hh) * 60);
     hudClock.textContent = String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
-    hudPhase.textContent = phaseName(hour) + (rainL > 0.3 ? '・スコール' : '');
+    hudPhase.textContent = phaseName(hour) + (rainL > 0.3 ? '・スコール' : EV.mist > 0.4 ? '・朝霧' : '');
     hudDist.textContent = '歩いた距離 ' + (st.dist / 1000).toFixed(2) + ' km ・ ' + (manual ? '手動' : walkMode === 'camp' ? (camp.sat ? '野営・焚火' : '野営地へ') : walkMode === 'trail' ? '小道' : walkMode === 'forest' ? '木々の間' : '小道へ戻る');
   }
   // 重い端末では解像度を下げる
